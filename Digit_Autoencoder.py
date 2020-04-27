@@ -23,10 +23,11 @@ class Custom_Padding(layers.Layer):
     def call(self, inputs):
         shape = inputs.shape
         zeros_1 = tf.zeros((shape[0],1,shape[2],shape[3]))
-        one_axis = tf.concat([inputs,zeros_1],1)
+        one_axis = tf.concat( values=[inputs,zeros_1] , axis=1)
         shape = one_axis.shape
         zeros_2 = tf.zeros((shape[0],shape[1],1,shape[3]))
-        return tf.concat([one_axis,zeros_2],2)
+        padded = tf.concat(values= [one_axis,zeros_2], axis= 2)
+        return tf.dtypes.cast(padded,tf.float32)
 
 
 class Encoder(layers.Layer):
@@ -110,7 +111,6 @@ class Autoencoder(tf.keras.Model):
     def call(self, inputs):
         representation = self.encoder(inputs)
         reconstruction = self.decoder(representation)
-        self.add_loss(lambda : losses.MSE(inputs, reconstruction))
         return reconstruction
 
 
@@ -118,22 +118,45 @@ class Autoencoder(tf.keras.Model):
 
 (train, _ ) , (test , _ ) = datasets.mnist.load_data()
 
-## How many images to display
-n = 10
-plt.figure(figsize=(10 , 2))
+train = train.astype('float32')/255.0
+test = test.astype('float32')/255.0
+
+train_shape = (train.shape[0],train.shape[1],train.shape[2],1)
+test_shape = (test.shape[0],test.shape[1],test.shape[2],1)
+
+train = np.reshape(train,train_shape)
+test = np.reshape(test,test_shape)
+
+
+
+batch_sz=32
+
+ae = Autoencoder(16,32,64)
+ae.build((batch_sz,28,28,1))
+ae.summary()
+
+ae.compile(optimiser='adadelta', loss=losses.MSE)
+
+ae.fit( train, train, epochs=5, batch_size=batch_sz, 
+        shuffle= True, validation_data=(test,test))
+
+decoded_imgs = ae.predict(test)
+
+n=10
+plt.figure(figsize=(20, 4))
 for i in range(n):
-    ax = plt.subplot(2,n,i+1)
-    plt.imshow(test[i].reshape(28,28))
+    # display original
+    ax = plt.subplot(2, n, i + 1)
+    plt.imshow(x_test[i].reshape(28, 28))
     plt.gray()
     ax.get_xaxis().set_visible(False)
     ax.get_yaxis().set_visible(False)
-    
+
+    # display reconstruction
+    ax = plt.subplot(2, n, i+1+n)
+    plt.imshow(decoded_imgs[i].reshape(28, 28))
+    plt.gray()
+    ax.get_xaxis().set_visible(False)
+    ax.get_yaxis().set_visible(False)
 plt.show()
-
-ae = Autoencoder(16,32,64)
-ae.build((1,28,28,1))
-ae.summary()
-
-ae.compile(optimiser='adam', loss=ae.loss)
-
 
