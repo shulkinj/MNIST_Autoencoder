@@ -115,7 +115,7 @@ class Autoencoder(tf.keras.Model):
 
 
 
-## Load Data
+###### Load Data ######
 (train, _ ) , (test , _ ) = datasets.mnist.load_data()
 
 train = train.astype('float32')/255.0
@@ -127,7 +127,8 @@ test_shape = (test.shape[0],test.shape[1],test.shape[2],1)
 train = np.reshape(train,train_shape)
 test = np.reshape(test,test_shape)
 
-## Add noise
+
+###### Add noise ######
 noise_factor = 0.3
 train_noisy = train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=train.shape) 
 test_noisy = test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=test.shape) 
@@ -136,19 +137,23 @@ train_noisy = np.clip(train_noisy, 0., 1.)
 test_noisy = np.clip(test_noisy, 0., 1.)
 
 
+
+###### Set up Model ######
 batch_sz=32
 
 ae = Autoencoder(16,32,64)
 
 
+opt = tf.keras.optimizers.Adam(learning_rate=1e-3)
+ae.compile(optimizer=opt, loss=losses.MSE)
 
-ae.compile(optimizer='adadelta', loss=losses.MSE)
 
-
+## Tensorboard set up ##
 log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
 
 
+###### TRAINING ######
 ae.fit( train_noisy, train, epochs=20, batch_size=batch_sz, 
         shuffle= True, validation_data=(test_noisy,test),
         callbacks=[tensorboard_callback])
@@ -159,9 +164,11 @@ ae.save('Saved_Model/denoiser')
 
 #ae = models.load_model('Saved_Model/denoiser')
 
+
+###### Display Test inputs and outputs #######
 decoded_imgs = ae.predict(test_noisy)
 
-n=10
+n=20
 plt.figure(figsize=(20, 4))
 for i in range(n):
     # display original
