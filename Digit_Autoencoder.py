@@ -1,17 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
-from tensorflow.keras import layers, datasets, losses 
+from tensorflow.keras import layers, datasets, losses , models
 import datetime
 
 tf.keras.backend.clear_session()  # For easy reset of notebook state.
-"""
-# Load the TensorBoard notebook extension
-%load_ext tensorboard
 
-# Clear any logs from previous runs
-!rm -rf ./logs/
-"""
+
+
+
 
 ## Custom padding that pads with zeros on right and bottom
 ## Used in Decoder to grow size from (6,6,32) to (7,7,32)
@@ -21,13 +18,15 @@ class Custom_Padding(layers.Layer):
         super(Custom_Padding,self).__init__(name=name)
 
     def call(self, inputs):
-        shape = inputs.shape
-        zeros_1 = tf.zeros((shape[0],1,shape[2],shape[3]))
+        dims = tf.stack([tf.shape(inputs)[0], 1, 
+                        tf.shape(inputs)[2], tf.shape(inputs)[3]])
+        zeros_1 = tf.fill(dims, 0.0)
         one_axis = tf.concat( values=[inputs,zeros_1] , axis=1)
-        shape = one_axis.shape
-        zeros_2 = tf.zeros((shape[0],shape[1],1,shape[3]))
+        dims = tf.stack([tf.shape(one_axis)[0], tf.shape(one_axis)[1], 
+                        1, tf.shape(one_axis)[3]])
+        zeros_2 = tf.fill(dims, 0.0)
         padded = tf.concat(values= [one_axis,zeros_2], axis= 2)
-        return tf.dtypes.cast(padded,tf.float32)
+        return padded
 
 
 class Encoder(layers.Layer):
@@ -74,22 +73,23 @@ class Decoder(layers.Layer):
         
         self.dense  = layers.Dense(dim_3*3*3, activation='relu')
         self.reshape = layers.Reshape((3,3,dim_3))
-        self.upsample_2 = layers.UpSampling2D((2,2))
+        self.upsample_3 = layers.UpSampling2D((2,2))
         self.padding = Custom_Padding()
-        self.convT_3 = layers.Conv2DTranspose(dim_3, (3,3) , strides=(1,1), padding='same', activation='relu')
+        self.convT_3 = layers.Conv2DTranspose(dim_2, (3,3) , strides=(1,1), padding='same', activation='relu')
         self.upsample_2 = layers.UpSampling2D((2,2))
-        self.convT_2 = layers.Conv2DTranspose(dim_2, (3,3) , strides=(1,1), padding='same', activation='relu')
+        self.convT_2 = layers.Conv2DTranspose(dim_1, (3,3) , strides=(1,1), padding='same', activation='relu')
         self.upsample_1 = layers.UpSampling2D((2,2))
-        self.convT_1 = layers.Conv2DTranspose(dim_1, (3,3) , strides=(1,1), padding='same', activation='relu')
+        self.convT_1 = layers.Conv2DTranspose(1, (3,3) , strides=(1,1), padding='same', activation='relu')
 
 
     def call(self, inputs):
         dense = self.dense(inputs)
         reshape = self.reshape(dense)
-        convT_3 = self.convT_3(reshape)
+        upsample_3 = self.upsample_3(reshape)
+        padding = self.padding(upsample_3)
+        convT_3 = self.convT_3(padding)
         upsample_2 = self.upsample_2(convT_3)
-        padding = self.padding(upsample_2)
-        convT_2 = self.convT_2(padding)
+        convT_2 = self.convT_2(upsample_2)
         upsample_1 = self.upsample_1(convT_2)
         convT_1 = self.convT_1(upsample_1)
         return convT_1
@@ -115,7 +115,7 @@ class Autoencoder(tf.keras.Model):
 
 
 
-
+## Load Data
 (train, _ ) , (test , _ ) = datasets.mnist.load_data()
 
 train = train.astype('float32')/255.0
@@ -127,27 +127,46 @@ test_shape = (test.shape[0],test.shape[1],test.shape[2],1)
 train = np.reshape(train,train_shape)
 test = np.reshape(test,test_shape)
 
+## Add noise
+noise_factor = 0.3
+train_noisy = train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=train.shape) 
+test_noisy = test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=test.shape) 
+
+train_noisy = np.clip(train_noisy, 0., 1.)
+test_noisy = np.clip(test_noisy, 0., 1.)
 
 
 batch_sz=32
 
 ae = Autoencoder(16,32,64)
-ae.build((batch_sz,28,28,1))
-ae.summary()
 
-ae.compile(optimiser='adadelta', loss=losses.MSE)
 
-ae.fit( train, train, epochs=5, batch_size=batch_sz, 
-        shuffle= True, validation_data=(test,test))
 
-decoded_imgs = ae.predict(test)
+ae.compile(optimizer='adadelta', loss=losses.MSE)
+
+
+log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+
+
+ae.fit( train_noisy, train, epochs=20, batch_size=batch_sz, 
+        shuffle= True, validation_data=(test_noisy,test),
+        callbacks=[tensorboard_callback])
+
+ae.save('Saved_Model/denoiser')
+
+
+
+#ae = models.load_model('Saved_Model/denoiser')
+
+decoded_imgs = ae.predict(test_noisy)
 
 n=10
 plt.figure(figsize=(20, 4))
 for i in range(n):
     # display original
     ax = plt.subplot(2, n, i + 1)
-    plt.imshow(x_test[i].reshape(28, 28))
+    plt.imshow(test_noisy[i].reshape(28, 28))
     plt.gray()
     ax.get_xaxis().set_visible(False)
     ax.get_yaxis().set_visible(False)
